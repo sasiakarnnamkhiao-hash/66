@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tight Grid Skin Builder</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --miku-green: #39C5BB;
+            --bg-dark: #020617;
+        }
+
+        body {
+            font-family: 'Kanit', sans-serif;
+            background: var(--bg-dark);
+            color: white;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* เมนูควบคุมสไตล์ Glassmorphism */
+        .controls {
+            position: sticky;
+            top: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 15px 25px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 0.7rem; color: var(--miku-green); font-weight: 600; text-transform: uppercase; }
+
+        input[type="number"] {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid var(--miku-green);
+            color: white;
+            padding: 8px;
+            border-radius: 8px;
+            width: 70px;
+            text-align: center;
+        }
+
+        .btn {
+            cursor: pointer;
+            border: none;
+            border-radius: 10px;
+            padding: 10px 20px;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+
+        .btn-upload { background: var(--miku-green); color: #000; }
+        .btn-export { background: #ffffff; color: #000; }
+        .btn:hover { transform: scale(1.05); }
+
+        /* --- จุดที่แก้ไข: Grid แบบชิดสนิท --- */
+        #collage-container {
+            display: grid;
+            grid-gap: 0; /* ไม่มีช่องว่างระหว่างรูปเลย */
+            padding: 0;
+            margin: 0;
+            line-height: 0; /* แก้ปัญหาช่องว่างด้านล่างของไฟล์ภาพ (inline-block gap) */
+            background: #000;
+            width: fit-content; /* กว้างเท่ากับจำนวนรูป */
+            border: 1px solid #333;
+        }
+
+        .skin-item {
+            position: relative;
+            background: #000;
+            cursor: move;
+            display: block; /* เปลี่ยนจาก Flex เป็น Block */
+            overflow: hidden;
+            width: 100%;
+        }
+
+        .skin-item img {
+            width: 100%;
+            height: auto; /* ให้ความสูงไหลตามรูปจริง */
+            display: block; /* ลบช่องว่างใต้รูปภาพ */
+        }
+
+        /* ปุ่มลบ */
+        .remove-btn {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: rgba(255, 0, 0, 0.8);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            width: 18px;
+            height: 18px;
+            font-size: 12px;
+            cursor: pointer;
+            z-index: 10;
+            display: none;
+        }
+        .skin-item:hover .remove-btn { display: block; }
+
+        #loading {
+            position: fixed;
+            top: 20px;
+            background: var(--miku-green);
+            color: black;
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-weight: bold;
+            display: none;
+            z-index: 2000;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading">ประมวลผล...</div>
+
+    <div class="controls">
+        <div class="input-group">
+            <label>รูปต่อแถว</label>
+            <input type="number" id="col-count" value="8" min="1">
+        </div>
+        
+        <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
+        <button class="btn btn-upload" onclick="document.getElementById('file-input').click()">
+            + เลือกรูป
+        </button>
+
+        <button class="btn btn-export" onclick="exportImage()">
+            💾 เซฟภาพ
+        </button>
+        
+        <div style="font-size: 0.9rem;">
+            Total: <span id="skin-count" style="color: var(--miku-green);">0</span>
+        </div>
+    </div>
+
+    <div id="collage-container"></div>
+
+    <script>
+        const container = document.getElementById('collage-container');
+        const colInput = document.getElementById('col-count');
+        const skinCountSpan = document.getElementById('skin-count');
+        const loading = document.getElementById('loading');
+
+        function updateLayout() {
+            container.style.gridTemplateColumns = `repeat(${colInput.value}, 1fr)`;
+            // ปรับขนาดความกว้างภาพตามจำนวนคอลัมน์ (สมมติความกว้างเฉลี่ยต่อรูปคือ 150px)
+            // หรือเอยจะเอาแบบขยายเต็มจอโทรศัพท์ก็ได้ครับ
+            container.style.width = (colInput.value * 120) + 'px'; 
+            if(window.innerWidth < parseInt(container.style.width)) {
+                container.style.width = '100%';
+            }
+        }
+        colInput.addEventListener('input', updateLayout);
+
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            loading.style.display = 'block';
+
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const div = document.createElement('div');
+                    div.className = 'skin-item';
+                    div.innerHTML = `
+                        <button class="remove-btn" onclick="this.parentElement.remove(); updateCounter();">✕</button>
+                        <img src="${event.target.result}">
+                    `;
+                    container.appendChild(div);
+                    updateCounter();
+                };
+                reader.readAsDataURL(file);
+            });
+
+            setTimeout(() => {
+                loading.style.display = 'none';
+                updateLayout();
+            }, 500);
+        });
+
+        function updateCounter() {
+            skinCountSpan.innerText = container.children.length;
+        }
+
+        new Sortable(container, {
+            animation: 150,
+            ghostClass: 'sortable-ghost'
+        });
+
+        async function exportImage() {
+            if (container.children.length === 0) return;
+            loading.style.display = 'block';
+            const removes = document.querySelectorAll('.remove-btn');
+            removes.forEach(b => b.style.display = 'none');
+
+            try {
+                const canvas = await html2canvas(container, {
+                    scale: 2, 
+                    backgroundColor: '#000000',
+                    logging: false
+                });
+
+                const link = document.createElement('a');
+                link.download = `Skins-${Date.now()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } catch (err) {
+                console.error(err);
+            } finally {
+                removes.forEach(b => b.style.display = '');
+                loading.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('resize', updateLayout);
+    </script>
+</body>
+</html>
